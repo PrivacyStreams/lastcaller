@@ -2,14 +2,16 @@ package com.dwak.lastcall;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.database.Cursor;
-import android.database.CursorIndexOutOfBoundsException;
 import android.net.Uri;
 import android.preference.PreferenceManager;
-import android.provider.CallLog;
-import android.provider.ContactsContract.PhoneLookup;
-import android.util.Log;
 
+import com.github.privacystreams.commons.list.ListOperators;
+import com.github.privacystreams.communication.Call;
+import com.github.privacystreams.communication.Contact;
+import com.github.privacystreams.core.Item;
+import com.github.privacystreams.core.UQI;
+import com.github.privacystreams.core.exceptions.PSException;
+import com.github.privacystreams.core.purposes.Purpose;
 import com.google.android.apps.dashclock.api.DashClockExtension;
 import com.google.android.apps.dashclock.api.ExtensionData;
 
@@ -28,55 +30,25 @@ public class LastCallExtension extends DashClockExtension {
     @Override
     protected void onUpdateData(int arg0) {
         final SharedPreferences mSharedPreferences = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+        final UQI uqi = new UQI(this);
         String mLastCallNumber = "";
         String mLastCallName = "";
-        String[] projection = new String[]{CallLog.Calls.NUMBER, CallLog.Calls.DATE};
-        Cursor cur = null;
-        Cursor cur2 = null;
         try {
-            cur = getContentResolver()
-                    .query(CallLog.Calls.CONTENT_URI,
-                            projection,
-                            null,
-                            null,
-                            CallLog.Calls.DATE + " desc");
-        } catch (CursorIndexOutOfBoundsException e) {
-            Log.d(TAG, "Cursor out of bounds, no calls");
-        }
-
-        if (cur != null) {
-            if (cur.getCount() != 0) {
-                cur.moveToFirst();
-                mLastCallNumber = cur.getString(0);
-                mLastCallTime = new Date(Long.valueOf(cur.getString(1)));
-                mLastCallTimeString = format.format(mLastCallTime);
-                Log.d(TAG, mLastCallTimeString);
-                Uri uri = Uri.withAppendedPath(PhoneLookup.CONTENT_FILTER_URI, Uri.encode("tel:" + mLastCallNumber));
-                cur2 = getContentResolver().query(uri,
-                        new String[]{PhoneLookup.DISPLAY_NAME},
-                        null,
-                        null,
-                        null);
-
-                if (cur2 != null) {
-                    if (cur2.moveToFirst()) {
-                        mLastCallName = cur2.getString(0);
-                    }
-                    else {
-                        mLastCallName = "Unknown";
-                    }
-
-                    cur2.close();
-                }
-                else {
-                    mLastCallName = "Unknown";
-                }
-            }
+            Item lastCall = uqi.getData(Call.getLogs(), Purpose.UTILITY("show lock screen"))
+                    .sortBy(Call.TIMESTAMP).reverse()
+                    .getFirst().asItem();
+            if (lastCall == null) mLastCallName = "No Call History";
             else {
-                mLastCallName = "No Call History";
-                mLastCallNumber = "";
+                mLastCallNumber = lastCall.getValueByField(Call.CONTACT);
+                mLastCallTime = new Date((Long) lastCall.getValueByField(Call.TIMESTAMP));
+                mLastCallTimeString = format.format(mLastCallTime);
+                mLastCallName = uqi.getData(Contact.getAll(), Purpose.UTILITY("show lock screen"))
+                        .filter(ListOperators.contains(Contact.PHONES, mLastCallNumber))
+                        .getFirst().getField(Contact.NAME);
+                if (mLastCallName == null) mLastCallName = "Unknown";
             }
-            cur.close();
+        } catch (PSException e) {
+            e.printStackTrace();
         }
 
         final boolean isDirectDial = mSharedPreferences.getBoolean(getString(R.string.pref_dial), false);
